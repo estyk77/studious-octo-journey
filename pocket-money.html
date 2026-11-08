@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ניהול דמי כיס</title>
+<style>
+  :root {
+    --bg: #f5f6fa; --card: #ffffff; --text: #1f2430; --muted: #6b7280;
+    --border: #e3e6ee; --accent: #3b6fd8; --accent-soft: #e8efff;
+    --good: #138a52; --good-soft: #e3f6ec; --bad: #c0392b; --bad-soft: #fdecea;
+    --warn: #b7791f; --warn-soft: #fdf3e1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171c; --card: #1f2229; --text: #e7e9ee; --muted: #9aa1ad;
+      --border: #333844; --accent: #7aa2ff; --accent-soft: #26304a;
+      --good: #4cc38a; --good-soft: #1c3329; --bad: #ff7b6e; --bad-soft: #3a2224;
+      --warn: #f0b75a; --warn-soft: #3a3020;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", Arial, "Noto Sans Hebrew", sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+  header { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 1.3rem; margin: 0; }
+  .today { color: var(--muted); font-size: .9rem; }
+  main { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .tab { border: 1px solid var(--border); background: var(--card); color: var(--text); padding: 8px 16px; border-radius: 999px; cursor: pointer; font-size: 1rem; }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tab.add { border-style: dashed; color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .stat .label { color: var(--muted); font-size: .85rem; }
+  .stat .value { font-size: 1.6rem; font-weight: 700; margin-top: 2px; }
+  .stat .sub { font-size: .85rem; color: var(--muted); margin-top: 2px; }
+  .stat.bad { background: var(--bad-soft); border-color: transparent; } .stat.bad .value { color: var(--bad); }
+  .stat.good { background: var(--good-soft); border-color: transparent; } .stat.good .value { color: var(--good); }
+  .stat.warn { background: var(--warn-soft); border-color: transparent; } .stat.warn .value { color: var(--warn); }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  section.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  section.card h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  .hint { color: var(--muted); font-size: .85rem; margin: -4px 0 10px; }
+  form.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; }
+  label.f { display: flex; flex-direction: column; font-size: .8rem; color: var(--muted); gap: 3px; flex: 1 1 120px; }
+  input, select { font: inherit; font-size: .95rem; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); min-width: 0; }
+  button { font: inherit; font-size: .95rem; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button.danger { background: transparent; border-color: transparent; color: var(--bad); padding: 2px 8px; }
+  button.danger:hover { background: var(--bad-soft); }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: .8rem; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.paused td { color: var(--muted); }
+  tr.paused td:nth-child(-n+3) { text-decoration: line-through; }
+  .tw { overflow-x: auto; }
+  .g { font-size: .75rem; color: var(--muted); text-decoration: none; }
+  .hd { font-size: .78rem; color: var(--accent); min-height: 1.1em; }
+  tr.dep td { background: var(--good-soft); }
+  tr.future td { opacity: .6; }
+  .pill { display: inline-block; font-size: .75rem; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+  .empty { color: var(--muted); font-size: .9rem; padding: 6px 0; }
+  .scroll { max-height: 420px; overflow: auto; }
+  footer { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 24px; color: var(--muted); font-size: .85rem; }
+  .welcome { text-align: center; padding: 50px 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>💰 ניהול דמי כיס</h1>
+  <span class="today" id="todayLbl"></span>
+</header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div id="content"></div>
+  <footer>
+    <span>הנתונים נשמרים בדפדפן במחשב הזה. מומלץ לגבות מדי פעם:</span>
+    <button class="ghost" id="exportBtn">⬇ ייצוא גיבוי</button>
+    <button class="ghost" id="importBtn">⬆ שחזור מגיבוי</button>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  const KEY = "pocketMoney.v1";
+  const HORIZON_YEARS = 5;
+
+  // ---------- date helpers (YYYY-MM-DD strings, local time) ----------
+  const pad = n => String(n).padStart(2, "0");
+  const ymd = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`; // m is 1-based
+  const todayStr = () => { const t = new Date(); return ymd(t.getFullYear(), t.getMonth() + 1, t.getDate()); };
+  const daysInMonth = (y, m) => new Date(y, m, 0).getDate();
+  const parse = s => s.split("-").map(Number);
+  const fmtGreg = s => { if (!s) return ""; const [y, m, d] = parse(s); return `${pad(d)}/${pad(m)}/${y}`; };
+  const nextDay = s => { const [y, m, d] = parse(s); const t = new Date(y, m - 1, d + 1); return ymd(t.getFullYear(), t.getMonth() + 1, t.getDate()); };
+
+  // ---------- Hebrew calendar ----------
+  const hebFmt = new Intl.DateTimeFormat("he-IL-u-ca-hebrew", { day: "numeric", month: "long", year: "numeric" });
+  const hebCache = new Map();
+  function heb(s) { // -> {day, month, year}
+    let r = hebCache.get(s);
+    if (!r) {
+      const [y, m, d] = parse(s);
+      const parts = hebFmt.formatToParts(new Date(y, m - 1, d, 12));
+      const g = t => parts.find(p => p.type === t)?.value || "";
+      r = { day: +g("day"), month: g("month"), year: +g("year") };
+      hebCache.set(s, r);
+    }
+    return r;
+  }
+  function gematria(n) {
+    n = n % 1000;
+    let out = "";
+    let h = Math.floor(n / 100);
+    while (h >= 4) { out += "ת"; h -= 4; }
+    out += ["", "ק", "ר", "ש"][h];
+    let rest = n % 100;
+    if (rest === 15) out += "טו"; else if (rest === 16) out += "טז";
+    else { out += ["", "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ"][Math.floor(rest / 10)] + ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"][rest % 10]; }
+    return out.length === 1 ? out + "׳" : out.slice(0, -1) + "״" + out.slice(-1);
+  }
+  const fmtDate = s => { if (!s) return ""; const h = heb(s); return `${gematria(h.day)} ב${h.month} ${gematria(h.year)}`; };
+  const addYears = (s, n) => { const [y, m, d] = parse(s); return ymd(y + n, m, Math.min(d, daysInMonth(y + n, m))); };
+  const monthName = (s, cal) => { if (cal === "gregorian") { const [y, m] = parse(s); return new Date(y, m - 1, 1).toLocaleDateString("he-IL", { month: "long", year: "numeric" }); } const h = heb(s); return `${h.month} ${gematria(h.year)}`; };
+  const daysBetween = (a, b) => { const [y1, m1, d1] = parse(a), [y2, m2, d2] = parse(b); return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000); };
+  const money = n => "₪" + (Math.round(n * 100) / 100).toLocaleString("he-IL", { maximumFractionDigits: 2 });
+  const uid = () => Math.random().toString(36).slice(2, 10);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // ---------- state ----------
+  let state = load();
+  let activeId = state.children[0]?.id || null;
+  let untilDate = todayStr();
+
+  function load() {
+    try { const raw = localStorage.getItem(KEY); if (raw) { const s = JSON.parse(raw); if (s && Array.isArray(s.children)) return s; } } catch (e) {}
+    return { children: [] };
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); }
+    catch (e) { alert("לא הצלחתי לשמור בדפדפן. כדאי לייצא גיבוי."); }
+  }
+  const child = () => state.children.find(c => c.id === activeId);
+
+  // ---------- calculations ----------
+  function rateAt(c, date) {
+    const rates = [...c.rates].sort((a, b) => a.from.localeCompare(b.from));
+    let amt = 0;
+    for (const r of rates) if (r.from <= date) amt = r.amount;
+    return amt;
+  }
+  function pauseAt(c, date) { return c.pauses.find(p => p.from <= date && date <= p.to); }
+
+  // All scheduled payments from start date until `until` (inclusive).
+  const calOf = c => c.calendar || "hebrew";
+  function schedule(c, until) {
+    return calOf(c) === "hebrew" ? scheduleHeb(c, until) : scheduleGreg(c, until);
+  }
+  const mkEntry = (c, date) => { const p = pauseAt(c, date); return { date, amount: rateAt(c, date), paused: !!p, pauseNote: p?.note || "" }; };
+  // Hebrew months: pay on day `payDay` of every Hebrew month (or the month's last day if shorter).
+  function scheduleHeb(c, until) {
+    const out = [];
+    const payDay = Math.min(c.payDay, 30);
+    let d = c.startDate;
+    const h0 = heb(d);
+    let done = h0.day > payDay ? h0.year + "|" + h0.month : null; // start month already passed
+    while (d <= until) {
+      const h = heb(d), key = h.year + "|" + h.month;
+      if (key !== done) {
+        const nd = nextDay(d);
+        if (h.day >= payDay || heb(nd).day === 1) { out.push(mkEntry(c, d)); done = key; }
+        d = nd;
+      } else d = nextDay(d);
+    }
+    return out;
+  }
+  function scheduleGreg(c, until) {
+    const out = [];
+    let [y, m] = parse(c.startDate);
+    while (true) {
+      const date = ymd(y, m, Math.min(c.payDay, daysInMonth(y, m)));
+      if (date > until) break;
+      if (date >= c.startDate) out.push(mkEntry(c, date));
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    return out;
+  }
+  const sumDeposits = (c, until) => c.deposits.filter(d => d.date <= until).reduce((s, d) => s + d.amount, 0);
+  const sumDue = (c, until) => schedule(c, until).filter(e => !e.paused).reduce((s, e) => s + e.amount, 0);
+  const balance = (c, until) => sumDue(c, until) - sumDeposits(c, until); // >0 => we owe the child
+
+  // First payment that is not covered by all deposits made so far.
+  function nextNeeded(c) {
+    const today = todayStr();
+    const paid = sumDeposits(c, "9999-12-31");
+    let cum = 0;
+    for (const e of schedule(c, addYears(today, HORIZON_YEARS))) {
+      if (e.paused) continue;
+      cum += e.amount;
+      if (cum > paid + 0.0001) return { ...e, toPay: cum - paid };
+    }
+    return null;
+  }
+  function nextScheduled(c) {
+    const today = todayStr();
+    return schedule(c, addYears(today, HORIZON_YEARS)).find(e => e.date >= today && !e.paused) || null;
+  }
+
+  // ---------- rendering ----------
+  const $ = id => document.getElementById(id);
+  const typeLabel = t => t === "card" ? "טעינת כרטיס" : "מזומן";
+  const payDayText = c => calOf(c) === "hebrew" ? `ב-${gematria(c.payDay)} לכל חודש עברי` : `ב-${c.payDay} לכל חודש לועזי`;
+  const depositVerb = t => t === "card" ? "טעינה" : "תשלום במזומן";
+
+  function render() {
+    $("todayLbl").textContent = "היום: " + fmtDate(todayStr()) + " (" + fmtGreg(todayStr()) + ")";
+    renderTabs();
+    const c = child();
+    $("content").innerHTML = c ? childView(c) : welcomeView();
+    bind(c);
+  }
+
+  function renderTabs() {
+    $("tabs").innerHTML = state.children.map(c =>
+      `<button class="tab ${c.id === activeId ? "active" : ""}" data-tab="${c.id}">${esc(c.name)} <span style="opacity:.75;font-size:.8em">(${typeLabel(c.type)})</span></button>`
+    ).join("") + `<button class="tab add" data-tab="__new">+ הוספת ילד</button>`;
+  }
+
+  function welcomeView() {
+    return `<section class="card welcome">
+      <h2>ברוכים הבאים 👋</h2>
+      <p class="hint">התחילו בהוספת ילד/ה. אפשר להוסיף כמה שרוצים.</p>
+      ${childForm(null)}
+    </section>`;
+  }
+
+  function childForm(c) {
+    const v = c ? { ...c, calendar: calOf(c) } : { name: "", type: "cash", payDay: 1, startDate: todayStr(), calendar: "hebrew" };
+    return `<form class="row" id="childForm">
+      <label class="f">שם<input name="name" required value="${esc(v.name)}"></label>
+      <label class="f">סוג
+        <select name="type">
+          <option value="cash" ${v.type === "cash" ? "selected" : ""}>מזומן</option>
+          <option value="card" ${v.type === "card" ? "selected" : ""}>טעינת כרטיס אשראי</option>
+        </select></label>
+      <label class="f">לוח שנה לתשלום
+        <select name="calendar">
+          <option value="hebrew" ${v.calendar === "hebrew" ? "selected" : ""}>עברי</option>
+          <option value="gregorian" ${v.calendar === "gregorian" ? "selected" : ""}>לועזי</option>
+        </select></label>
+      <label class="f">יום תשלום בחודש (1–30)<input name="payDay" type="number" min="1" max="31" required value="${v.payDay}"></label>
+      <label class="f">תאריך התחלה<input name="startDate" type="date" required value="${v.startDate}"></label>
+      ${c ? "" : `<label class="f">סכום חודשי (₪)<input name="amount" type="number" min="0" step="0.01" required></label>`}
+      <button type="submit">${c ? "שמירת שינויים" : "הוספה"}</button>
+      ${c ? `<button type="button" class="ghost" id="deleteChild" style="color:var(--bad);border-color:var(--bad)">מחיקת ילד</button>` : ""}
+    </form>`;
+  }
+
+  function childView(c) {
+    const today = todayStr();
+    const owedToday = balance(c, today);
+    const owedUntil = balance(c, untilDate);
+    const need = nextNeeded(c);
+    const nextSch = nextScheduled(c);
+    const curRate = rateAt(c, today);
+    const curPause = pauseAt(c, today);
+
+    // --- stat: balance today
+    let balCls, balSub;
+    if (owedToday > 0.0001) { balCls = "bad"; balSub = "חוב לילד נכון להיום"; }
+    else if (owedToday < -0.0001) { balCls = "good"; balSub = `שולם מראש ביתרה של ${money(-owedToday)}`; }
+    else { balCls = "good"; balSub = "הכל מסודר, אין חוב"; }
+
+    // --- stat: next deposit
+    let nextHtml;
+    if (!need) nextHtml = `<div class="value">—</div><div class="sub">אין תשלומים מתוכננים</div>`;
+    else if (need.date <= today) {
+      const late = daysBetween(need.date, today);
+      nextHtml = `<div class="value">עכשיו!</div><div class="sub">באיחור ${late === 0 ? "— היום" : late + " ימים"} (מ-${fmtDate(need.date)}) · לשלם ${money(need.toPay)}</div>`;
+    } else {
+      const inDays = daysBetween(today, need.date);
+      nextHtml = `<div class="value">${fmtDate(need.date)}</div><div class="sub">בעוד ${inDays} ימים · לשלם ${money(need.toPay)}</div>`;
+    }
+    const nextCls = !need ? "" : need.date <= today ? "bad" : daysBetween(today, need.date) <= 7 ? "warn" : "";
+
+    // --- ledger until selected date
+    const rows = [];
+    for (const e of schedule(c, untilDate)) rows.push({ kind: "due", ...e });
+    for (const d of c.deposits) if (d.date <= untilDate) rows.push({ kind: "dep", ...d });
+    rows.sort((a, b) => a.date.localeCompare(b.date) || (a.kind === "due" ? -1 : 1));
+    let run = 0;
+    const ledger = rows.map(r => {
+      if (r.kind === "due") {
+        if (!r.paused) run += r.amount;
+        return `<tr class="${r.paused ? "paused" : ""} ${r.date > today ? "future" : ""}">
+          <td>${fmtDate(r.date)}<div class="g">${fmtGreg(r.date)}</div></td><td>דמי כיס ${monthName(r.date, calOf(c))}${r.paused ? ` <span class="pill">ללא דמי כיס${r.pauseNote ? ": " + esc(r.pauseNote) : ""}</span>` : ""}</td>
+          <td class="num">${r.paused ? money(0) : "+" + money(r.amount)}</td><td class="num">${money(run)}</td></tr>`;
+      }
+      run -= r.amount;
+      return `<tr class="dep ${r.date > today ? "future" : ""}"><td>${fmtDate(r.date)}<div class="g">${fmtGreg(r.date)}</div></td><td>${depositVerb(c.type)}${r.note ? " — " + esc(r.note) : ""}</td>
+        <td class="num">−${money(r.amount)}</td><td class="num">${money(run)}</td></tr>`;
+    }).reverse().join("");
+
+    const deposits = [...c.deposits].sort((a, b) => b.date.localeCompare(a.date));
+    const rates = [...c.rates].sort((a, b) => b.from.localeCompare(a.from));
+    const pauses = [...c.pauses].sort((a, b) => b.from.localeCompare(a.from));
+
+    return `
+    <div class="grid">
+      <div class="stat ${balCls}"><div class="label">יתרה נכון להיום</div>
+        <div class="value">${money(Math.max(owedToday, 0))}</div><div class="sub">${balSub}</div></div>
+      <div class="stat ${nextCls}"><div class="label">ההפקדה הבאה (${depositVerb(c.type)})</div>${nextHtml}</div>
+      <div class="stat"><div class="label">סכום חודשי נוכחי</div>
+        <div class="value">${money(curRate)}</div>
+        <div class="sub">${curPause ? `⏸ כרגע בהפסקה עד ${fmtDate(curPause.to)}` : `${payDayText(c)}${nextSch ? " · מועד קרוב: " + fmtDate(nextSch.date) : ""}`}</div></div>
+    </div>
+
+    <section class="card">
+      <h2>כמה חייבים עד תאריך מסוים?</h2>
+      <form class="row" id="untilForm">
+        <label class="f" style="flex:0 1 200px">עד תאריך (כולל)<input type="date" name="until" value="${untilDate}"></label>
+        <button type="button" class="ghost" id="untilToday">היום</button>
+      </form>
+      <div style="font-size:1.1rem">
+        עד ${fmtDate(untilDate)}: ${owedUntil > 0.0001
+          ? `<b style="color:var(--bad)">חייבים ל${esc(c.name)} ${money(owedUntil)}</b>`
+          : owedUntil < -0.0001 ? `<b style="color:var(--good)">אין חוב — שולם מראש ${money(-owedUntil)}</b>`
+          : `<b style="color:var(--good)">אין חוב</b>`}
+        <span class="hint">(מגיע ${money(sumDue(c, untilDate))}, הופקד ${money(sumDeposits(c, untilDate))})</span>
+      </div>
+    </section>
+
+    <div class="cols">
+      <section class="card">
+        <h2>➕ רישום הפקדה</h2>
+        <p class="hint">אפשר להפקיד בכל תאריך ובכל סכום — גם על כמה חודשים יחד או מראש.</p>
+        <form class="row" id="depForm">
+          <label class="f">תאריך<input type="date" name="date" required value="${today}"></label>
+          <label class="f">סכום (₪)<input type="number" name="amount" min="0.01" step="0.01" required value="${need ? Math.round(need.toPay * 100) / 100 : ""}"></label>
+          <label class="f" style="flex-basis:160px">הערה<input name="note" placeholder="אופציונלי"></label>
+          <button type="submit">רישום</button>
+        </form>
+        ${deposits.length ? `<div class="scroll"><table><thead><tr><th>תאריך</th><th>סכום</th><th>הערה</th><th></th></tr></thead><tbody>
+          ${deposits.map(d => `<tr><td>${fmtDate(d.date)}</td><td class="num">${money(d.amount)}</td><td>${esc(d.note)}</td>
+            <td><button class="danger" data-del-dep="${d.id}" title="מחיקה">✕</button></td></tr>`).join("")}
+          </tbody></table></div>` : `<div class="empty">עדיין אין הפקדות.</div>`}
+      </section>
+
+      <section class="card">
+        <h2>✏️ עדכון סכום חודשי</h2>
+        <p class="hint">הסכום החדש יחול מהתאריך שתבחרו והלאה. הסכומים הקודמים נשמרים בהיסטוריה.</p>
+        <form class="row" id="rateForm">
+          <label class="f">החל מתאריך<input type="date" name="from" required value="${today}"></label>
+          <label class="f">סכום חודשי (₪)<input type="number" name="amount" min="0" step="0.01" required></label>
+          <button type="submit">עדכון</button>
+        </form>
+        <table><thead><tr><th>החל מ-</th><th>סכום</th><th></th></tr></thead><tbody>
+          ${rates.map(r => `<tr><td>${fmtDate(r.from)}</td><td class="num">${money(r.amount)}</td>
+            <td>${c.rates.length > 1 ? `<button class="danger" data-del-rate="${r.id}" title="מחיקה">✕</button>` : ""}</td></tr>`).join("")}
+        </tbody></table>
+      </section>
+
+      <section class="card">
+        <h2>⏸ תקופות ללא דמי כיס</h2>
+        <p class="hint">חופשות וכדומה: חודש שמועד התשלום שלו (${payDayText(c)}) נופל בתוך התקופה — לא ייספר.</p>
+        <form class="row" id="pauseForm">
+          <label class="f">מתאריך<input type="date" name="from" required></label>
+          <label class="f">עד תאריך<input type="date" name="to" required></label>
+          <label class="f" style="flex-basis:140px">סיבה<input name="note" placeholder="למשל: חופש גדול"></label>
+          <button type="submit">הוספה</button>
+        </form>
+        ${pauses.length ? `<div class="tw"><table><thead><tr><th>מתאריך</th><th>עד</th><th>סיבה</th><th>חודשים שמדולגים</th><th></th></tr></thead><tbody>
+          ${pauses.map(p => {
+            const skipped = schedule(c, p.to).filter(e => e.date >= p.from).map(e => monthName(e.date, calOf(c)));
+            return `<tr><td>${fmtDate(p.from)}</td><td>${fmtDate(p.to)}</td><td>${esc(p.note)}</td>
+              <td style="font-size:.85rem">${skipped.length ? skipped.join(", ") : `<span style="color:var(--warn)">אף חודש (מועד התשלום לא בטווח)</span>`}</td>
+              <td><button class="danger" data-del-pause="${p.id}" title="מחיקה">✕</button></td></tr>`;
+          }).join("")}
+        </tbody></table></div>` : `<div class="empty">אין תקופות מוגדרות.</div>`}
+      </section>
+
+      <section class="card">
+        <h2>⚙️ הגדרות ${esc(c.name)}</h2>
+        ${childForm(c)}
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>היסטוריה עד ${fmtDate(untilDate)}</h2>
+      <p class="hint">"יתרה" = כמה חייבים לילד אחרי כל שורה (מינוס = שולם מראש).</p>
+      ${ledger ? `<div class="scroll"><table><thead><tr><th>תאריך</th><th>תיאור</th><th>סכום</th><th>יתרה</th></tr></thead><tbody>${ledger}</tbody></table></div>`
+        : `<div class="empty">אין עדיין תנועות.</div>`}
+    </section>`;
+  }
+
+  // ---------- events ----------
+  const formData = f => Object.fromEntries(new FormData(f).entries());
+
+  function bind(c) {
+    document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
+      if (b.dataset.tab === "__new") {
+        activeId = null;
+        render();
+        $("content").innerHTML = `<section class="card"><h2>הוספת ילד/ה</h2>${childForm(null)}</section>`;
+        bindChildForm(null);
+        addHebHints();
+        document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === "__new"));
+        return;
+      }
+      activeId = b.dataset.tab; render();
+    });
+    bindChildForm(c);
+    addHebHints();
+    if (!c) return;
+
+    $("untilForm").until.onchange = e => { if (e.target.value) { untilDate = e.target.value; render(); } };
+    $("untilToday").onclick = () => { untilDate = todayStr(); render(); };
+
+    $("depForm").onsubmit = e => {
+      e.preventDefault(); const v = formData(e.target);
+      c.deposits.push({ id: uid(), date: v.date, amount: +v.amount, note: v.note.trim() });
+      save(); render();
+    };
+    $("rateForm").onsubmit = e => {
+      e.preventDefault(); const v = formData(e.target);
+      c.rates = c.rates.filter(r => r.from !== v.from);
+      c.rates.push({ id: uid(), from: v.from, amount: +v.amount });
+      if (v.from < c.startDate) { c.startDate = v.from; }
+      save(); render();
+    };
+    $("pauseForm").onsubmit = e => {
+      e.preventDefault(); const v = formData(e.target);
+      if (v.to < v.from) { alert("תאריך הסיום לפני תאריך ההתחלה"); return; }
+      c.pauses.push({ id: uid(), from: v.from, to: v.to, note: v.note.trim() });
+      save(); render();
+    };
+    document.querySelectorAll("[data-del-dep]").forEach(b => b.onclick = () => {
+      if (!confirm("למחוק את ההפקדה?")) return;
+      c.deposits = c.deposits.filter(d => d.id !== b.dataset.delDep); save(); render();
+    });
+    document.querySelectorAll("[data-del-rate]").forEach(b => b.onclick = () => {
+      if (!confirm("למחוק את עדכון הסכום?")) return;
+      c.rates = c.rates.filter(r => r.id !== b.dataset.delRate); save(); render();
+    });
+    document.querySelectorAll("[data-del-pause]").forEach(b => b.onclick = () => {
+      if (!confirm("למחוק את התקופה?")) return;
+      c.pauses = c.pauses.filter(p => p.id !== b.dataset.delPause); save(); render();
+    });
+    const del = $("deleteChild");
+    if (del) del.onclick = () => {
+      if (!confirm(`למחוק את ${c.name} וכל הנתונים שלו/ה? לא ניתן לבטל.`)) return;
+      state.children = state.children.filter(x => x.id !== c.id);
+      activeId = state.children[0]?.id || null; save(); render();
+    };
+  }
+
+  function addHebHints() {
+    document.querySelectorAll('input[type="date"]').forEach(inp => {
+      const hint = document.createElement("span"); hint.className = "hd";
+      const upd = () => { hint.textContent = inp.value ? fmtDate(inp.value) : "\u00a0"; };
+      inp.after(hint); inp.addEventListener("input", upd); upd();
+    });
+  }
+
+  function bindChildForm(c) {
+    const f = $("childForm"); if (!f) return;
+    f.onsubmit = e => {
+      e.preventDefault(); const v = formData(f);
+      const payDay = Math.min(31, Math.max(1, parseInt(v.payDay, 10) || 1));
+      if (c) {
+        Object.assign(c, { name: v.name.trim(), type: v.type, calendar: v.calendar, payDay, startDate: v.startDate });
+        // keep the earliest rate effective from the start date
+        const first = [...c.rates].sort((a, b) => a.from.localeCompare(b.from))[0];
+        if (first && first.from > v.startDate) first.from = v.startDate;
+      } else {
+        const n = { id: uid(), name: v.name.trim(), type: v.type, calendar: v.calendar, payDay, startDate: v.startDate,
+          rates: [{ id: uid(), from: v.startDate, amount: +v.amount }], deposits: [], pauses: [] };
+        state.children.push(n); activeId = n.id;
+      }
+      save(); render();
+    };
+  }
+
+  // ---------- backup ----------
+  $("exportBtn").onclick = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `pocket-money-backup-${todayStr()}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $("importBtn").onclick = () => $("importFile").click();
+  $("importFile").onchange = async e => {
+    const file = e.target.files[0]; if (!file) return;
+    try {
+      const s = JSON.parse(await file.text());
+      if (!s || !Array.isArray(s.children)) throw new Error("bad");
+      if (!confirm("השחזור יחליף את כל הנתונים הנוכחיים. להמשיך?")) return;
+      state = s; activeId = state.children[0]?.id || null; save(); render();
+    } catch (err) { alert("הקובץ לא תקין"); }
+    e.target.value = "";
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>
