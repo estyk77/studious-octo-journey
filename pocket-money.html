@@ -55,6 +55,8 @@
   tr.paused td { color: var(--muted); }
   tr.paused td:nth-child(-n+3) { text-decoration: line-through; }
   .tw { overflow-x: auto; }
+  .g { font-size: .75rem; color: var(--muted); text-decoration: none; }
+  .hd { font-size: .78rem; color: var(--accent); min-height: 1.1em; }
   tr.dep td { background: var(--good-soft); }
   tr.future td { opacity: .6; }
   .pill { display: inline-block; font-size: .75rem; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
@@ -92,9 +94,37 @@
   const todayStr = () => { const t = new Date(); return ymd(t.getFullYear(), t.getMonth() + 1, t.getDate()); };
   const daysInMonth = (y, m) => new Date(y, m, 0).getDate();
   const parse = s => s.split("-").map(Number);
-  const fmtDate = s => { if (!s) return ""; const [y, m, d] = parse(s); return `${pad(d)}/${pad(m)}/${y}`; };
+  const fmtGreg = s => { if (!s) return ""; const [y, m, d] = parse(s); return `${pad(d)}/${pad(m)}/${y}`; };
+  const nextDay = s => { const [y, m, d] = parse(s); const t = new Date(y, m - 1, d + 1); return ymd(t.getFullYear(), t.getMonth() + 1, t.getDate()); };
+
+  // ---------- Hebrew calendar ----------
+  const hebFmt = new Intl.DateTimeFormat("he-IL-u-ca-hebrew", { day: "numeric", month: "long", year: "numeric" });
+  const hebCache = new Map();
+  function heb(s) { // -> {day, month, year}
+    let r = hebCache.get(s);
+    if (!r) {
+      const [y, m, d] = parse(s);
+      const parts = hebFmt.formatToParts(new Date(y, m - 1, d, 12));
+      const g = t => parts.find(p => p.type === t)?.value || "";
+      r = { day: +g("day"), month: g("month"), year: +g("year") };
+      hebCache.set(s, r);
+    }
+    return r;
+  }
+  function gematria(n) {
+    n = n % 1000;
+    let out = "";
+    let h = Math.floor(n / 100);
+    while (h >= 4) { out += "ת"; h -= 4; }
+    out += ["", "ק", "ר", "ש"][h];
+    let rest = n % 100;
+    if (rest === 15) out += "טו"; else if (rest === 16) out += "טז";
+    else { out += ["", "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ"][Math.floor(rest / 10)] + ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"][rest % 10]; }
+    return out.length === 1 ? out + "׳" : out.slice(0, -1) + "״" + out.slice(-1);
+  }
+  const fmtDate = s => { if (!s) return ""; const h = heb(s); return `${gematria(h.day)} ב${h.month} ${gematria(h.year)}`; };
   const addYears = (s, n) => { const [y, m, d] = parse(s); return ymd(y + n, m, Math.min(d, daysInMonth(y + n, m))); };
-  const monthName = s => { const [y, m] = parse(s); return new Date(y, m - 1, 1).toLocaleDateString("he-IL", { month: "long", year: "numeric" }); };
+  const monthName = (s, cal) => { if (cal === "gregorian") { const [y, m] = parse(s); return new Date(y, m - 1, 1).toLocaleDateString("he-IL", { month: "long", year: "numeric" }); } const h = heb(s); return `${h.month} ${gematria(h.year)}`; };
   const daysBetween = (a, b) => { const [y1, m1, d1] = parse(a), [y2, m2, d2] = parse(b); return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000); };
   const money = n => "₪" + (Math.round(n * 100) / 100).toLocaleString("he-IL", { maximumFractionDigits: 2 });
   const uid = () => Math.random().toString(36).slice(2, 10);
@@ -125,16 +155,35 @@
   function pauseAt(c, date) { return c.pauses.find(p => p.from <= date && date <= p.to); }
 
   // All scheduled payments from start date until `until` (inclusive).
+  const calOf = c => c.calendar || "hebrew";
   function schedule(c, until) {
+    return calOf(c) === "hebrew" ? scheduleHeb(c, until) : scheduleGreg(c, until);
+  }
+  const mkEntry = (c, date) => { const p = pauseAt(c, date); return { date, amount: rateAt(c, date), paused: !!p, pauseNote: p?.note || "" }; };
+  // Hebrew months: pay on day `payDay` of every Hebrew month (or the month's last day if shorter).
+  function scheduleHeb(c, until) {
+    const out = [];
+    const payDay = Math.min(c.payDay, 30);
+    let d = c.startDate;
+    const h0 = heb(d);
+    let done = h0.day > payDay ? h0.year + "|" + h0.month : null; // start month already passed
+    while (d <= until) {
+      const h = heb(d), key = h.year + "|" + h.month;
+      if (key !== done) {
+        const nd = nextDay(d);
+        if (h.day >= payDay || heb(nd).day === 1) { out.push(mkEntry(c, d)); done = key; }
+        d = nd;
+      } else d = nextDay(d);
+    }
+    return out;
+  }
+  function scheduleGreg(c, until) {
     const out = [];
     let [y, m] = parse(c.startDate);
     while (true) {
       const date = ymd(y, m, Math.min(c.payDay, daysInMonth(y, m)));
       if (date > until) break;
-      if (date >= c.startDate) {
-        const p = pauseAt(c, date);
-        out.push({ date, amount: rateAt(c, date), paused: !!p, pauseNote: p?.note || "" });
-      }
+      if (date >= c.startDate) out.push(mkEntry(c, date));
       m++; if (m > 12) { m = 1; y++; }
     }
     return out;
@@ -163,10 +212,11 @@
   // ---------- rendering ----------
   const $ = id => document.getElementById(id);
   const typeLabel = t => t === "card" ? "טעינת כרטיס" : "מזומן";
+  const payDayText = c => calOf(c) === "hebrew" ? `ב-${gematria(c.payDay)} לכל חודש עברי` : `ב-${c.payDay} לכל חודש לועזי`;
   const depositVerb = t => t === "card" ? "טעינה" : "תשלום במזומן";
 
   function render() {
-    $("todayLbl").textContent = "היום: " + fmtDate(todayStr());
+    $("todayLbl").textContent = "היום: " + fmtDate(todayStr()) + " (" + fmtGreg(todayStr()) + ")";
     renderTabs();
     const c = child();
     $("content").innerHTML = c ? childView(c) : welcomeView();
@@ -188,7 +238,7 @@
   }
 
   function childForm(c) {
-    const v = c || { name: "", type: "cash", payDay: 1, startDate: todayStr() };
+    const v = c ? { ...c, calendar: calOf(c) } : { name: "", type: "cash", payDay: 1, startDate: todayStr(), calendar: "hebrew" };
     return `<form class="row" id="childForm">
       <label class="f">שם<input name="name" required value="${esc(v.name)}"></label>
       <label class="f">סוג
@@ -196,7 +246,12 @@
           <option value="cash" ${v.type === "cash" ? "selected" : ""}>מזומן</option>
           <option value="card" ${v.type === "card" ? "selected" : ""}>טעינת כרטיס אשראי</option>
         </select></label>
-      <label class="f">יום תשלום בחודש<input name="payDay" type="number" min="1" max="31" required value="${v.payDay}"></label>
+      <label class="f">לוח שנה לתשלום
+        <select name="calendar">
+          <option value="hebrew" ${v.calendar === "hebrew" ? "selected" : ""}>עברי</option>
+          <option value="gregorian" ${v.calendar === "gregorian" ? "selected" : ""}>לועזי</option>
+        </select></label>
+      <label class="f">יום תשלום בחודש (1–30)<input name="payDay" type="number" min="1" max="31" required value="${v.payDay}"></label>
       <label class="f">תאריך התחלה<input name="startDate" type="date" required value="${v.startDate}"></label>
       ${c ? "" : `<label class="f">סכום חודשי (₪)<input name="amount" type="number" min="0" step="0.01" required></label>`}
       <button type="submit">${c ? "שמירת שינויים" : "הוספה"}</button>
@@ -241,11 +296,11 @@
       if (r.kind === "due") {
         if (!r.paused) run += r.amount;
         return `<tr class="${r.paused ? "paused" : ""} ${r.date > today ? "future" : ""}">
-          <td>${fmtDate(r.date)}</td><td>דמי כיס ${monthName(r.date)}${r.paused ? ` <span class="pill">ללא דמי כיס${r.pauseNote ? ": " + esc(r.pauseNote) : ""}</span>` : ""}</td>
+          <td>${fmtDate(r.date)}<div class="g">${fmtGreg(r.date)}</div></td><td>דמי כיס ${monthName(r.date, calOf(c))}${r.paused ? ` <span class="pill">ללא דמי כיס${r.pauseNote ? ": " + esc(r.pauseNote) : ""}</span>` : ""}</td>
           <td class="num">${r.paused ? money(0) : "+" + money(r.amount)}</td><td class="num">${money(run)}</td></tr>`;
       }
       run -= r.amount;
-      return `<tr class="dep ${r.date > today ? "future" : ""}"><td>${fmtDate(r.date)}</td><td>${depositVerb(c.type)}${r.note ? " — " + esc(r.note) : ""}</td>
+      return `<tr class="dep ${r.date > today ? "future" : ""}"><td>${fmtDate(r.date)}<div class="g">${fmtGreg(r.date)}</div></td><td>${depositVerb(c.type)}${r.note ? " — " + esc(r.note) : ""}</td>
         <td class="num">−${money(r.amount)}</td><td class="num">${money(run)}</td></tr>`;
     }).reverse().join("");
 
@@ -260,7 +315,7 @@
       <div class="stat ${nextCls}"><div class="label">ההפקדה הבאה (${depositVerb(c.type)})</div>${nextHtml}</div>
       <div class="stat"><div class="label">סכום חודשי נוכחי</div>
         <div class="value">${money(curRate)}</div>
-        <div class="sub">${curPause ? `⏸ כרגע בהפסקה עד ${fmtDate(curPause.to)}` : `ב-${c.payDay} לכל חודש${nextSch ? " · מועד קרוב: " + fmtDate(nextSch.date) : ""}`}</div></div>
+        <div class="sub">${curPause ? `⏸ כרגע בהפסקה עד ${fmtDate(curPause.to)}` : `${payDayText(c)}${nextSch ? " · מועד קרוב: " + fmtDate(nextSch.date) : ""}`}</div></div>
     </div>
 
     <section class="card">
@@ -310,7 +365,7 @@
 
       <section class="card">
         <h2>⏸ תקופות ללא דמי כיס</h2>
-        <p class="hint">חופשות וכדומה: חודש שמועד התשלום שלו (ה-${c.payDay}) נופל בתוך התקופה — לא ייספר.</p>
+        <p class="hint">חופשות וכדומה: חודש שמועד התשלום שלו (${payDayText(c)}) נופל בתוך התקופה — לא ייספר.</p>
         <form class="row" id="pauseForm">
           <label class="f">מתאריך<input type="date" name="from" required></label>
           <label class="f">עד תאריך<input type="date" name="to" required></label>
@@ -319,9 +374,9 @@
         </form>
         ${pauses.length ? `<div class="tw"><table><thead><tr><th>מתאריך</th><th>עד</th><th>סיבה</th><th>חודשים שמדולגים</th><th></th></tr></thead><tbody>
           ${pauses.map(p => {
-            const skipped = schedule(c, p.to).filter(e => e.date >= p.from).map(e => monthName(e.date));
+            const skipped = schedule(c, p.to).filter(e => e.date >= p.from).map(e => monthName(e.date, calOf(c)));
             return `<tr><td>${fmtDate(p.from)}</td><td>${fmtDate(p.to)}</td><td>${esc(p.note)}</td>
-              <td style="font-size:.85rem">${skipped.length ? skipped.join(", ") : `<span style="color:var(--warn)">אף חודש (התאריך ${c.payDay} לא בטווח)</span>`}</td>
+              <td style="font-size:.85rem">${skipped.length ? skipped.join(", ") : `<span style="color:var(--warn)">אף חודש (מועד התשלום לא בטווח)</span>`}</td>
               <td><button class="danger" data-del-pause="${p.id}" title="מחיקה">✕</button></td></tr>`;
           }).join("")}
         </tbody></table></div>` : `<div class="empty">אין תקופות מוגדרות.</div>`}
@@ -351,12 +406,14 @@
         render();
         $("content").innerHTML = `<section class="card"><h2>הוספת ילד/ה</h2>${childForm(null)}</section>`;
         bindChildForm(null);
+        addHebHints();
         document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === "__new"));
         return;
       }
       activeId = b.dataset.tab; render();
     });
     bindChildForm(c);
+    addHebHints();
     if (!c) return;
 
     $("untilForm").until.onchange = e => { if (e.target.value) { untilDate = e.target.value; render(); } };
@@ -400,18 +457,26 @@
     };
   }
 
+  function addHebHints() {
+    document.querySelectorAll('input[type="date"]').forEach(inp => {
+      const hint = document.createElement("span"); hint.className = "hd";
+      const upd = () => { hint.textContent = inp.value ? fmtDate(inp.value) : "\u00a0"; };
+      inp.after(hint); inp.addEventListener("input", upd); upd();
+    });
+  }
+
   function bindChildForm(c) {
     const f = $("childForm"); if (!f) return;
     f.onsubmit = e => {
       e.preventDefault(); const v = formData(f);
       const payDay = Math.min(31, Math.max(1, parseInt(v.payDay, 10) || 1));
       if (c) {
-        Object.assign(c, { name: v.name.trim(), type: v.type, payDay, startDate: v.startDate });
+        Object.assign(c, { name: v.name.trim(), type: v.type, calendar: v.calendar, payDay, startDate: v.startDate });
         // keep the earliest rate effective from the start date
         const first = [...c.rates].sort((a, b) => a.from.localeCompare(b.from))[0];
         if (first && first.from > v.startDate) first.from = v.startDate;
       } else {
-        const n = { id: uid(), name: v.name.trim(), type: v.type, payDay, startDate: v.startDate,
+        const n = { id: uid(), name: v.name.trim(), type: v.type, calendar: v.calendar, payDay, startDate: v.startDate,
           rates: [{ id: uid(), from: v.startDate, amount: +v.amount }], deposits: [], pauses: [] };
         state.children.push(n); activeId = n.id;
       }
